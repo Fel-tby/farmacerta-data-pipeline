@@ -1,0 +1,21 @@
+{
+  "name": "farmacerta-pb",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "apps/*",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev": "npm --workspace apps/web run dev",
+    "build": "npm --workspace apps/web run build",
+    "lint": "npm --workspace apps/web run lint",
+    "data:collect": "python scripts/collect_sources.py",
+    "data:extract:uf": "python scripts/extract_uf.py",
+    "data:extract:municipio": "python scripts/extract_municipality.py",
+    "data:extract": "python scripts/extract_municipality.py",
+    "data:build": "python scripts/generate_dashboard_data.py",
+    "data:pipeline": "python scripts/run_pipeline.py",
+    "generate:data": "python scripts/generate_dashboard_data.py"
+  }
+}

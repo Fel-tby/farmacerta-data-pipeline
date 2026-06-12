@@ -1,0 +1,34 @@
+{
+  "bnafar": {
+    "stock_position": {
+      "name": "BNAFAR - Posicao de Estoque 06-06-2026",
+      "source_page": "https://dadosabertos.saude.gov.br/dataset/bnafar-posicao-de-estoque",
+      "url": "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/bnafar/csv/Posicao_Estoque_csv_06-06-2026.zip",
+      "archive_path": "data/raw/bnafar/full_extract/bnafar_posicao_estoque_2026-06-06.zip",
+      "extract_dir": "data/raw/bnafar/full_extract/extracted"
+    }
+  },
+  "bps": {
+    "2023": {
+      "name": "BPS - Base Anual 2023",
+      "source_page": "https://dadosabertos.saude.gov.br/dataset/bps",
+      "url": "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/BPS/csv/2023_csv.zip",
+      "archive_path": "data/raw/bps/bps_2023.zip",
+      "extract_dir": "data/raw/bps/extracted_2023"
+    },
+    "2024": {
+      "name": "BPS - Base Anual 2024",
+      "source_page": "https://dadosabertos.saude.gov.br/dataset/bps",
+      "url": "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/BPS/csv/2024_csv.zip",
+      "archive_path": "data/raw/bps/bps_2024.zip",
+      "extract_dir": "data/raw/bps/extracted_2024"
+    },
+    "2025": {
+      "name": "BPS - Base Anual 2025",
+      "source_page": "https://dadosabertos.saude.gov.br/dataset/bps",
+      "url": "https://s3.sa-east-1.amazonaws.com/ckan.saude.gov.br/BPS/csv/2025_csv.zip",
+      "archive_path": "data/raw/bps/bps_2025.zip",
+      "extract_dir": "data/raw/bps/extracted_2025"
+    }
+  }
+}
