@@ -1,6 +1,6 @@
-# FarmaCerta PB
+# FarmaCerta
 
-FarmaCerta PB é um projeto open source de engenharia de dados para assistência farmacêutica municipal. A proposta coleta bases públicas, transforma esses dados em uma camada analítica municipal e entrega os resultados para uma interface de inteligência em saúde.
+FarmaCerta é um projeto open source de engenharia de dados para assistência farmacêutica municipal. A proposta coleta bases públicas, transforma esses dados em uma camada analítica municipal e entrega os resultados para uma interface de inteligência em saúde.
 
 O projeto foi vencedor em 1º lugar no **Smart Cities Park - Hackathon Território 2030**.
 
