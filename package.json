@@ -16,6 +16,7 @@
     "data:extract": "python scripts/extract_municipality.py",
     "data:build": "python scripts/generate_dashboard_data.py",
     "data:pipeline": "python scripts/run_pipeline.py",
+    "data:pipeline:all": "python scripts/generate_all_municipalities.py",
     "generate:data": "python scripts/generate_dashboard_data.py"
   }
 }

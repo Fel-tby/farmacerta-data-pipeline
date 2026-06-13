@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server";
-import { campinaDashboard } from "@farmacerta/data";
+import type { DashboardData } from "@farmacerta/data";
+import defaultDashboard from "@farmacerta/data/src/municipios/pb/campina-grande/dashboard.json";
 
 type CopilotRequest = {
   question?: string;
   activeView?: string;
+  dashboard?: DashboardData;
 };
 
 type CopilotResponse = {
@@ -12,32 +14,32 @@ type CopilotResponse = {
   mode: "deterministic" | "llm";
 };
 
-function baseEvidence() {
-  const [year, month, day] = campinaDashboard.meta.stockPositionDate.split("-");
+function baseEvidence(dashboard: DashboardData) {
+  const [year, month, day] = dashboard.meta.stockPositionDate.split("-");
   return [
-    `Fonte: ${campinaDashboard.meta.stockSource}, posição ${day}/${month}/${year}.`,
-    "Recorte: 26 unidades/CNES com estoque publicado no BNAFAR para Campina Grande/PB."
+    `Fonte: ${dashboard.meta.stockSource}, posição ${day}/${month}/${year}.`,
+    `Recorte: ${dashboard.unitPoints.length} unidades/CNES com estoque publicado no BNAFAR para ${dashboard.meta.municipality}/${dashboard.meta.state}.`
   ];
 }
 
-function deterministicAnswer(question: string): CopilotResponse {
-  const cards = campinaDashboard.cards;
+function deterministicAnswer(question: string, dashboard: DashboardData): CopilotResponse {
+  const cards = dashboard.cards;
   const normalized = question
     .normalize("NFD")
     .replace(/\p{Diacritic}/gu, "")
     .toLowerCase();
-  const topUnit = campinaDashboard.unitPoints[0];
-  const topRelocation = campinaDashboard.relocation[0];
-  const topPrice = campinaDashboard.priceCatalog.find((item) => item.observationsPB > 0);
+  const topUnit = dashboard.unitPoints[0];
+  const topRelocation = dashboard.relocation[0];
+  const topPrice = dashboard.priceCatalog.find((item) => item.observationsPB > 0);
 
   if (normalized.includes("preco") || normalized.includes("compra") || normalized.includes("bps")) {
     return {
       answer:
-        `Para compra defensável, informe uma cotação unitária e compare com BPS-PB/Brasil. ` +
-        `Há ${cards.priceReferenceCoveragePB} itens do recorte com referência BPS-PB e ${cards.priceReferenceCoverageBrazil} com referência BPS Brasil. ` +
+        `Para compra defensável, informe uma cotação unitária e compare com BPS-${dashboard.meta.state}/Brasil. ` +
+        `Há ${cards.priceReferenceCoveragePB} itens do recorte com referência BPS-${dashboard.meta.state} e ${cards.priceReferenceCoverageBrazil} com referência BPS Brasil. ` +
         `Exemplo com referência: ${topPrice?.product ?? "item com BPS disponível"}.`,
       evidence: [
-        ...baseEvidence(),
+        ...baseEvidence(dashboard),
         "BNAFAR não traz preço de compra; preço precisa vir de cotação informada, BPS ou CMED."
       ],
       mode: "deterministic"
@@ -50,7 +52,7 @@ function deterministicAnswer(question: string): CopilotResponse {
         `${cards.expiredPositiveRows} registros possuem saldo positivo com validade vencida, ` +
         `e ${cards.expiring60Rows} registros vencem em até 60 dias. A ação segura é revisar/segregar vencidos e priorizar giro dos próximos vencimentos.`,
       evidence: [
-        ...baseEvidence(),
+        ...baseEvidence(dashboard),
         "Regra: dt_validade vencida ou em até 60 dias, considerando apenas qt_estoque maior que zero."
       ],
       mode: "deterministic"
@@ -63,7 +65,7 @@ function deterministicAnswer(question: string): CopilotResponse {
         `${cards.relocationProducts} produtos aparecem zerados em alguma unidade e com saldo positivo em outra. ` +
         `O maior caso listado é ${topRelocation?.product ?? "um item com doador interno"}, com saldo disponível de ${topRelocation?.availableStock ?? 0}.`,
       evidence: [
-        ...baseEvidence(),
+        ...baseEvidence(dashboard),
         "Regra: produto com qt_estoque = 0 em unidade receptora e qt_estoque > 0 em unidade doadora."
       ],
       mode: "deterministic"
@@ -76,7 +78,7 @@ function deterministicAnswer(question: string): CopilotResponse {
         `A unidade que aparece primeiro no ranking de risco é ${topUnit.name}, CNES ${topUnit.cnes}. ` +
         `Ela tem ${topUnit.zeroRows} registros zerados, ${topUnit.expiredRows} vencidos com saldo e ${topUnit.expiringRows} vencendo.`,
       evidence: [
-        ...baseEvidence(),
+        ...baseEvidence(dashboard),
         "Regra de ranking: registros zerados + vencidos com peso maior + vencimentos próximos."
       ],
       mode: "deterministic"
@@ -85,17 +87,17 @@ function deterministicAnswer(question: string): CopilotResponse {
 
   return {
     answer:
-      `${cards.zeroProductCount} produtos estão totalmente zerados no recorte municipal de Campina Grande, ` +
+      `${cards.zeroProductCount} produtos estão totalmente zerados no recorte municipal de ${dashboard.meta.municipality}, ` +
       `somando ${cards.zeroStockRows} registros de estoque zero. Isso é ruptura no recorte publicado, não previsão de demanda.`,
     evidence: [
-      ...baseEvidence(),
+      ...baseEvidence(dashboard),
       "Regra: soma municipal de qt_estoque por produto igual a zero."
     ],
     mode: "deterministic"
   };
 }
 
-async function llmAnswer(question: string, fallback: CopilotResponse) {
+async function llmAnswer(question: string, fallback: CopilotResponse, dashboard: DashboardData) {
   const apiKey = process.env.OPENAI_API_KEY;
   if (!apiKey) return fallback;
 
@@ -106,7 +108,7 @@ async function llmAnswer(question: string, fallback: CopilotResponse) {
     const payload = {
       model: process.env.OPENAI_MODEL ?? "gpt-5.4-mini",
       instructions:
-        "Você é o copiloto do FarmaCerta PB. Responda em português, de forma curta, operacional e auditável. Use apenas o contexto fornecido. Se o dado não existir, diga que não existe no recorte. Não invente consumo histórico, preço de compra, prescrição, dispensação ou previsão.",
+        "Você é o copiloto do FarmaCerta. Responda em português, de forma curta, operacional e auditável. Use apenas o contexto fornecido. Se o dado não existir, diga que não existe no recorte. Não invente consumo histórico, preço de compra, prescrição, dispensação ou previsão.",
       input: [
         {
           role: "user",
@@ -116,11 +118,13 @@ async function llmAnswer(question: string, fallback: CopilotResponse) {
               text: JSON.stringify({
                 pergunta: question,
                 fallback,
-                metricas: campinaDashboard.cards,
-                dataQuality: campinaDashboard.dataQuality,
-                topUnits: campinaDashboard.unitPoints.slice(0, 5),
-                topRelocation: campinaDashboard.relocation.slice(0, 5),
-                topPrices: campinaDashboard.priceCatalog.slice(0, 5)
+                municipio: dashboard.meta.municipality,
+                uf: dashboard.meta.state,
+                metricas: dashboard.cards,
+                dataQuality: dashboard.dataQuality,
+                topUnits: dashboard.unitPoints.slice(0, 5),
+                topRelocation: dashboard.relocation.slice(0, 5),
+                topPrices: dashboard.priceCatalog.slice(0, 5)
               })
             }
           ]
@@ -163,9 +167,10 @@ export async function POST(request: Request) {
     body = {};
   }
 
+  const dashboard = body.dashboard || (defaultDashboard as DashboardData);
   const question = body.question?.trim() || "O que está sem estoque?";
-  const fallback = deterministicAnswer(question);
-  const answer = await llmAnswer(question, fallback);
+  const fallback = deterministicAnswer(question, dashboard);
+  const answer = await llmAnswer(question, fallback, dashboard);
 
   return NextResponse.json(answer);
 }

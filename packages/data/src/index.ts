@@ -1,6 +1,6 @@
-import dashboardData from "./municipios/pb/campina-grande/dashboard.json";
-import regionalPartnersData from "./regional-partners.json";
 import cmedPricesData from "./cmed-prices.json";
+import type dashboardData from "./municipios/pb/campina-grande/dashboard.json";
+import type regionalPartnersData from "./municipios/pb/campina-grande/regional-partners.json";
 
 export type RiskLevel = "baixo" | "moderado" | "alto" | "critico";
 
@@ -112,8 +112,6 @@ export type PriceReference = {
 
 export type DashboardData = typeof dashboardData;
 
-export const campinaDashboard = dashboardData;
-
 export type PartnerProduct = {
   catmat: string;
   produto: string;
@@ -170,5 +168,23 @@ export type CmedPricesPayload = {
   produtos: CmedPriceItem[];
 };
 
-export const regionalPartners = regionalPartnersData as RegionalPartnersPayload;
 export const cmedPrices = cmedPricesData as CmedPricesPayload;
+
+export type MunicipalityIndexEntry = {
+  slug: string;
+  name: string;
+  uf: string;
+  generatedAt: string;
+};
+
+export async function loadDashboard(uf: string, slug: string): Promise<DashboardData> {
+  return import(`./municipios/${uf.toLowerCase()}/${slug}/dashboard.json`).then(m => m.default as DashboardData);
+}
+
+export async function loadRegionalPartners(uf: string, slug: string): Promise<RegionalPartnersPayload> {
+  return import(`./municipios/${uf.toLowerCase()}/${slug}/regional-partners.json`).then(m => m.default as RegionalPartnersPayload);
+}
+
+export async function getMunicipalityList(): Promise<MunicipalityIndexEntry[]> {
+  return import("./municipios/index.json").then(m => m.default as MunicipalityIndexEntry[]);
+}

@@ -26,18 +26,23 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  campinaDashboard,
   cmedPrices,
-  regionalPartners,
+  loadDashboard,
+  loadRegionalPartners,
+  getMunicipalityList,
+  type DashboardData,
+  type RegionalPartnersPayload,
   type MedicationSummary,
   type PartnerProduct,
   type PriceReference,
   type RegionalPartner,
   type RelocationSuggestion,
   type StockRow,
-  type UnitPoint
+  type UnitPoint,
+  type MunicipalityIndexEntry
 } from "@farmacerta/data";
 import { classifyPriceDeviation, draftPriceAnswer } from "@farmacerta/ai";
+import { createContext, useContext } from "react";
 
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -46,14 +51,13 @@ const currency = new Intl.NumberFormat("pt-BR", {
 
 const numberFmt = new Intl.NumberFormat("pt-BR");
 
-type ActiveView = "situacao" | "investigar" | "parceria" | "agir" | "relatorios";
+type ActiveView = "situacao" | "investigar" | "parceria" | "agir";
 
 const viewTitles: Record<ActiveView, string> = {
   situacao: "Situação Atual",
   investigar: "Investigar",
   parceria: "Parceria Regional",
-  agir: "Agir",
-  relatorios: "Relatórios"
+  agir: "Agir"
 };
 
 function riskLabel(level: string) {
@@ -92,8 +96,26 @@ function formatStock(value: number) {
   return numberFmt.format(Number(value) || 0);
 }
 
-function sourceLine() {
-  return `Fonte: BNAFAR, posição ${formatDate(campinaDashboard.meta.stockPositionDate)}. Recorte: 26 unidades/CNES com estoque publicado.`;
+type MunicipalityContextType = {
+  dashboard: DashboardData;
+  regionalPartners: RegionalPartnersPayload;
+  slug: string;
+  name: string;
+  uf: string;
+};
+
+const MunicipalityContext = createContext<MunicipalityContextType | null>(null);
+
+function useMunicipality() {
+  const ctx = useContext(MunicipalityContext);
+  if (!ctx) {
+    throw new Error("useMunicipality must be used within a MunicipalityProvider");
+  }
+  return ctx;
+}
+
+function sourceLine(dashboard: DashboardData) {
+  return `Fonte: BNAFAR, posição ${formatDate(dashboard.meta.stockPositionDate)}. Recorte: ${dashboard.unitPoints.length} unidades/CNES com estoque publicado.`;
 }
 
 function MetricCard({
@@ -135,8 +157,7 @@ function Sidebar({
     ["situacao", "Situação Atual", Home],
     ["investigar", "Investigar", Search],
     ["parceria", "Parceria Regional", Handshake],
-    ["agir", "Agir", Sparkles],
-    ["relatorios", "Relatórios", FileText]
+    ["agir", "Agir", Sparkles]
   ] as const;
 
   return (
@@ -282,14 +303,16 @@ function UnitMap({
     map.panTo([selected.lat, selected.lon], { animate: true });
   }, [selected, units]);
 
+  const { name, dashboard } = useMunicipality();
+
   return (
     <section className="mapPanel">
       <div className="sectionTitle">
         <div>
-          <h2>Mapa operacional de Campina Grande</h2>
-          <p>26 unidades/CNES com estoque publicado nesta carga do BNAFAR</p>
+          <h2>Mapa operacional de {name}</h2>
+          <p>{units.length} unidades/CNES com estoque publicado nesta carga do BNAFAR</p>
         </div>
-        <span className="dataPill">Posição {formatDate(campinaDashboard.meta.stockPositionDate)}</span>
+        <span className="dataPill">Posição {formatDate(dashboard.meta.stockPositionDate)}</span>
       </div>
 
       <div ref={mapElementRef} className="leafletMap" aria-label="Mapa funcional com unidades do BNAFAR" />
@@ -360,7 +383,8 @@ function AlertTable({ rows }: { rows: AlertRow[] }) {
 }
 
 function Recommendations() {
-  const cards = campinaDashboard.cards;
+  const { dashboard } = useMunicipality();
+  const cards = dashboard.cards;
 
   return (
     <section className="sidePanel recommendations">
@@ -382,7 +406,8 @@ function Recommendations() {
 }
 
 function PriceWorkbench({ compact = true }: { compact?: boolean }) {
-  const references = campinaDashboard.priceCatalog as PriceReference[];
+  const { dashboard } = useMunicipality();
+  const references = dashboard.priceCatalog as PriceReference[];
   const [selectedCode, setSelectedCode] = useState(references[0]?.code ?? "");
   const selected = references.find((item) => item.code === selectedCode) ?? references[0];
   const [price, setPrice] = useState("0.25");
@@ -550,7 +575,8 @@ function PriceWorkbench({ compact = true }: { compact?: boolean }) {
 }
 
 function CopilotPanel({ activeView }: { activeView: string }) {
-  const cards = campinaDashboard.cards;
+  const { dashboard } = useMunicipality();
+  const cards = dashboard.cards;
   const questions = [
     "O que está sem estoque?",
     "O que pode ser remanejado?",
@@ -559,8 +585,8 @@ function CopilotPanel({ activeView }: { activeView: string }) {
     "Como defender uma compra?"
   ];
   const [question, setQuestion] = useState(questions[0]);
-  const [answer, setAnswer] = useState(`${cards.zeroProductCount} produtos estão totalmente zerados no recorte municipal de Campina Grande.`);
-  const [evidence, setEvidence] = useState<string[]>([sourceLine()]);
+  const [answer, setAnswer] = useState(`${cards.zeroProductCount} produtos estão totalmente zerados no recorte municipal de ${dashboard.meta.municipality}.`);
+  const [evidence, setEvidence] = useState<string[]>([sourceLine(dashboard)]);
   const [loading, setLoading] = useState(false);
 
   async function askCopilot(nextQuestion = question) {
@@ -570,14 +596,14 @@ function CopilotPanel({ activeView }: { activeView: string }) {
       const response = await fetch("/api/copilot", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ question: nextQuestion, activeView })
+        body: JSON.stringify({ question: nextQuestion, activeView, dashboard })
       });
       const data = await response.json();
       setAnswer(data.answer);
       setEvidence(data.evidence ?? []);
     } catch {
       setAnswer("Não consegui acionar o copiloto agora. O fallback local mantém os indicadores do painel disponíveis.");
-      setEvidence([sourceLine()]);
+      setEvidence([sourceLine(dashboard)]);
     } finally {
       setLoading(false);
     }
@@ -630,9 +656,10 @@ function SituacaoAtualView({
   onNavigateToInvestigar: (tab: "unidades" | "medicamentos" | "lotes") => void;
   onNavigateToAgir: (tab: "remanejar" | "comprar" | "copiloto") => void;
 }) {
-  const units = campinaDashboard.unitPoints as UnitPoint[];
-  const medications = campinaDashboard.medicationSummaries as MedicationSummary[];
-  const cards = campinaDashboard.cards;
+  const { dashboard } = useMunicipality();
+  const units = dashboard.unitPoints as UnitPoint[];
+  const medications = dashboard.medicationSummaries as MedicationSummary[];
+  const cards = dashboard.cards;
 
   // Donut Chart calculations (Saúde da Rede)
   const criticoCount = units.filter((u) => u.riskLevel === "critico").length;
@@ -875,7 +902,7 @@ function SituacaoAtualView({
       <div className="quickActionsGrid">
         <button className="actionLinkCard" onClick={() => onNavigateToInvestigar("medicamentos")} type="button">
           <h3><Boxes size={18} /> {medsZerados} Medicamentos Zerados</h3>
-          <p>Identifique desabastecimentos completos no município de Campina Grande e consulte unidades alternativas.</p>
+          <p>Identifique desabastecimentos completos no município de {dashboard.meta.municipality} e consulte unidades alternativas.</p>
           <span>Investigar Medicamentos &rarr;</span>
         </button>
 
@@ -960,7 +987,8 @@ function InvestigarView({
 }
 
 function MedicationsView() {
-  const medications = campinaDashboard.medicationSummaries as MedicationSummary[];
+  const { dashboard } = useMunicipality();
+  const medications = dashboard.medicationSummaries as MedicationSummary[];
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("todos");
   const filtered = medications.filter((item) => {
@@ -1069,15 +1097,15 @@ function MedicationsView() {
             </div>
           ) : null}
         </section>
-        <CopilotPanel activeView="medicamentos" />
       </aside>
     </section>
   );
 }
 
 function StockViewWithTimeline() {
-  const rows = campinaDashboard.stockRows as StockRow[];
-  const units = campinaDashboard.unitPoints as UnitPoint[];
+  const { dashboard } = useMunicipality();
+  const rows = dashboard.stockRows as StockRow[];
+  const units = dashboard.unitPoints as UnitPoint[];
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState("todos");
   const [unit, setUnit] = useState("todas");
@@ -1125,7 +1153,7 @@ function StockViewWithTimeline() {
           onClick={() => setStatus("Vencido")}
           type="button"
         >
-          <strong>{campinaDashboard.cards.expiredPositiveRows}</strong>
+          <strong>{dashboard.cards.expiredPositiveRows}</strong>
           <span>Vencidos</span>
         </button>
         <button
@@ -1133,7 +1161,7 @@ function StockViewWithTimeline() {
           onClick={() => setStatus("Vence em 30 dias")}
           type="button"
         >
-          <strong>{campinaDashboard.cards.expiring30Rows}</strong>
+          <strong>{dashboard.cards.expiring30Rows}</strong>
           <span>Vence &lt; 30 dias</span>
         </button>
         <button
@@ -1141,7 +1169,7 @@ function StockViewWithTimeline() {
           onClick={() => setStatus("Vence em 60 dias")}
           type="button"
         >
-          <strong>{campinaDashboard.cards.expiring60Rows}</strong>
+          <strong>{dashboard.cards.expiring60Rows}</strong>
           <span>Vence &lt; 60 dias</span>
         </button>
         <button
@@ -1195,8 +1223,9 @@ function UnitsView({
   selectedUnit: UnitPoint;
   setSelectedUnit: (unit: UnitPoint) => void;
 }) {
-  const units = campinaDashboard.unitPoints as UnitPoint[];
-  const rows = (campinaDashboard.stockRows as StockRow[]).filter((row) => row.cnes === selectedUnit.cnes);
+  const { dashboard } = useMunicipality();
+  const units = dashboard.unitPoints as UnitPoint[];
+  const rows = (dashboard.stockRows as StockRow[]).filter((row) => row.cnes === selectedUnit.cnes);
 
   return (
     <section className="moduleGrid" style={{ animation: "fadeIn 0.2s" }}>
@@ -1303,18 +1332,19 @@ function AgirView({
 }
 
 function RelocationView() {
-  const relocation = campinaDashboard.relocation as RelocationSuggestion[];
+  const { dashboard } = useMunicipality();
+  const relocation = dashboard.relocation as RelocationSuggestion[];
   const [justification, setJustification] = useState<string | null>(null);
   const [justifiedProduct, setJustifiedProduct] = useState<string | null>(null);
 
   function handleGenerateJustification(item: RelocationSuggestion) {
-    const text = `JUSTIFICATIVA DE REMANEJAMENTO OPERACIONAL - FARMAOPERACIONAL PB
+    const text = `JUSTIFICATIVA DE REMANEJAMENTO OPERACIONAL - FARMAOPERACIONAL
 ----------------------------------------------------------------------
 Medicamento: ${item.product}
 Data da Solicitação: ${new Date().toLocaleDateString("pt-BR")}
-Base de Dados: BNAFAR de ${formatDate(campinaDashboard.meta.stockPositionDate)}
+Base de Dados: BNAFAR de ${formatDate(dashboard.meta.stockPositionDate)}
 
-Conforme auditoria periódica do estoque municipal de Campina Grande/PB, recomenda-se o remanejamento imediato do medicamento supracitado.
+Conforme auditoria periódica do estoque municipal de ${dashboard.meta.municipality}/${dashboard.meta.state}, recomenda-se o remanejamento imediato do medicamento supracitado.
 
 Destinatários Desabastecidos (Estoque Zero):
 ${item.zeroUnits.map((u) => ` - ${u}`).join("\n")}
@@ -1425,7 +1455,8 @@ Movimentar lotes válidos das unidades doadoras para os postos com desabastecime
 }
 
 function PurchaseView() {
-  const relocation = campinaDashboard.relocation as RelocationSuggestion[];
+  const { dashboard } = useMunicipality();
+  const relocation = dashboard.relocation as RelocationSuggestion[];
 
   return (
     <section className="moduleGrid" style={{ animation: "fadeIn 0.2s" }}>
@@ -1451,7 +1482,7 @@ function PurchaseView() {
                 </tr>
               </thead>
               <tbody>
-                {(campinaDashboard.priceCatalog as PriceReference[]).slice(0, 40).map((item) => (
+                {(dashboard.priceCatalog as PriceReference[]).slice(0, 40).map((item) => (
                   <tr key={`${item.code}-${item.product}`}>
                     <td>{item.product}</td>
                     <td>{item.code}</td>
@@ -1492,74 +1523,8 @@ function PurchaseView() {
 }
 
 /* ==========================================================================
-   RELATÓRIOS AUDITÁVEIS
+   RELATÓRIOS AUDITÁVEIS (REMOVIDO)
    ========================================================================== */
-function ReportsView() {
-  const cards = campinaDashboard.cards;
-  const reportText = [
-    "FarmaCerta PB - Pré-teste Campina Grande/PB",
-    sourceLine(),
-    `Produtos totalmente zerados no município: ${cards.zeroProductCount}.`,
-    `Registros com estoque zero: ${cards.zeroStockRows}.`,
-    `Lotes vencidos com saldo positivo: ${cards.expiredPositiveRows}.`,
-    `Registros vencendo em até 60 dias: ${cards.expiring60Rows}.`,
-    `Produtos com remanejamento possível: ${cards.relocationProducts}.`,
-    `Itens com referência BPS-PB: ${cards.priceReferenceCoveragePB}.`,
-    "Limitação: BNAFAR não traz preço de compra, consumo histórico, prescrição ou dispensação ao cidadão."
-  ].join("\n");
-
-  async function copyReport() {
-    await navigator.clipboard?.writeText(reportText);
-  }
-
-  return (
-    <section className="moduleGrid" style={{ animation: "fadeIn 0.2s" }}>
-      <div className="mainColumn">
-        <section className="tablePanel">
-          <div className="tableHeader">
-            <div>
-              <h2>Relatórios auditáveis</h2>
-              <p>Resumo copiável para auditoria e decisão operacional</p>
-            </div>
-            <button className="primaryButton" onClick={copyReport} type="button"><Copy size={17} /> Copiar síntese</button>
-          </div>
-          <div className="reportGrid">
-            {Object.values(campinaDashboard.reportMetrics).map((item) => (
-              <article className="reportCard" key={item.title}>
-                <span>{item.title}</span>
-                <strong>{numberFmt.format(item.count)}</strong>
-                <p>{item.rule}</p>
-              </article>
-            ))}
-          </div>
-          <textarea className="reportText" readOnly value={reportText} />
-        </section>
-      </div>
-      <aside className="rightRail">
-        <section className="sidePanel">
-          <div className="sectionTitle compact">
-            <div>
-              <h2>Qualidade do dado</h2>
-              <p>Limitações explícitas</p>
-            </div>
-            <ClipboardList size={22} />
-          </div>
-          <div className="referenceGrid">
-            <span>Linhas BNAFAR</span><strong>{numberFmt.format(campinaDashboard.dataQuality.rows)}</strong>
-            <span>CNES publicados</span><strong>{campinaDashboard.dataQuality.coordinatesValid}</strong>
-            <span>Lotes sem código</span><strong>{campinaDashboard.dataQuality.missingLots}</strong>
-            <span>Quantidades negativas</span><strong>{campinaDashboard.dataQuality.negativeQuantityRows}</strong>
-          </div>
-          <div className="miniList">
-            {campinaDashboard.dataQuality.notes.map((note) => (
-              <div key={note}><span>{note}</span></div>
-            ))}
-          </div>
-        </section>
-      </aside>
-    </section>
-  );
-}
 
 /* ==========================================================================
    PARCERIA REGIONAL (COMPRA CONJUNTA E CONSÓRCIOS)
@@ -1573,11 +1538,13 @@ interface PartnerProductWithStock {
 function SVGRelationMap({
   partners,
   selected,
-  onSelect
+  onSelect,
+  baseName
 }: {
   partners: RegionalPartner[];
   selected: RegionalPartner | null;
   onSelect: (p: RegionalPartner) => void;
+  baseName: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [hovered, setHovered] = useState<RegionalPartner | null>(null);
@@ -1681,7 +1648,7 @@ function SVGRelationMap({
             );
           })}
 
-          {/* Center node - Campina Grande */}
+          {/* Center node - Base */}
           <circle cx="200" cy="200" r="11" fill="var(--green)" stroke="var(--bg)" strokeWidth="2.5" />
           <circle cx="200" cy="200" r="18" fill="none" stroke="var(--green)" strokeWidth="1" strokeDasharray="2 2" className="pulse-slow" />
           <text
@@ -1693,7 +1660,7 @@ function SVGRelationMap({
             fontWeight="bold"
             style={{ userSelect: "none" }}
           >
-            Campina Grande
+            {baseName}
           </text>
         </svg>
       </div>
@@ -1714,7 +1681,7 @@ function SVGRelationMap({
       )}
 
       <div className="mapLegend">
-        <span><i className="dot green" /> Campina Grande (Base)</span>
+        <span><i className="dot green" /> {baseName} (Base)</span>
         <span><i className="dot cyan" /> Candidato a Compra Conjunta</span>
       </div>
     </div>
@@ -1722,10 +1689,11 @@ function SVGRelationMap({
 }
 
 function ParceriaRegionalView() {
+  const { regionalPartners, dashboard } = useMunicipality();
   const [tab, setTab] = useState<"municipio" | "produto">("municipio");
   const [query, setQuery] = useState("");
   const [selectedPartner, setSelectedPartner] = useState<RegionalPartner | null>(
-    regionalPartners.parceiros.find((p) => p.municipio === "Areia") || regionalPartners.parceiros[0] || null
+    regionalPartners.parceiros[0] || null
   );
   
   const [oficioText, setOficioText] = useState<string | null>(null);
@@ -1738,18 +1706,18 @@ function ParceriaRegionalView() {
   // Total de oportunidades unicas produto x municipio
   const totalOpportunities = useMemo(() => {
     return regionalPartners.parceiros.reduce((sum, p) => sum + p.produtos.length, 0);
-  }, []);
+  }, [regionalPartners]);
 
   const bestPartner = useMemo(() => {
     return regionalPartners.parceiros[0] || null;
-  }, []);
+  }, [regionalPartners]);
 
   // Filter partners
   const filteredPartners = useMemo(() => {
     return regionalPartners.parceiros
       .filter((p) => p.municipio.toLowerCase().includes(query.toLowerCase()))
       .sort((a, b) => b.produtosZeradosEmComum - a.produtosZeradosEmComum);
-  }, [query]);
+  }, [query, regionalPartners]);
 
   // Product-centric index
   const productsMap = useMemo(() => {
@@ -1801,8 +1769,8 @@ function ParceriaRegionalView() {
     const text = `OFÍCIO DE CONSULTA OPERACIONAL PARA COMPRA CONJUNTA
 ----------------------------------------------------------------------
 De: Coordenação Municipal de Assistência Farmacêutica
-    Campina Grande / PB
-Para: Secretaria Municipal de Saúde de ${partner.municipio.toUpperCase()} / PB
+    ${dashboard.meta.municipality} / ${dashboard.meta.state}
+Para: Secretaria Municipal de Saúde de ${partner.municipio.toUpperCase()} / ${dashboard.meta.state}
 Assunto: Proposta de Aquisição Compartilhada de Medicamentos
 Referência Legal: Art. 15 da Lei Federal nº 8.666/1993 (SRP)
                   Lei Federal nº 11.107/2005 (Consórcios Públicos)
@@ -1818,7 +1786,7 @@ Esta falta em comum configura uma necessidade regional compartilhada que justifi
 2. ADESÃO COMPARTILHADA A ATA DE REGISTRO DE PREÇOS (SRP) de forma conjunta, conforme faculta a legislação vigente.
 
 Itens prioritários com falta de estoque em comum para planejamento de compra conjunta:
-${medsList.map((m) => ` - ${m.produto} (CATMAT: ${m.catmat}) - Estoque CG: 0 | Estoque ${partner.municipio}: 0`).join("\n")}
+${medsList.map((m) => ` - ${m.produto} (CATMAT: ${m.catmat}) - Estoque ${dashboard.meta.municipality}: 0 | Estoque ${partner.municipio}: 0`).join("\n")}
 
 Certos da atenção que o tema merece para o fortalecimento da nossa rede regional de assistência à saúde e ganho de eficiência nas contratações públicas, aguardamos manifestação de interesse para agendamento de reunião técnica de alinhamento.
 
@@ -1827,7 +1795,7 @@ Respeitosamente,
 __________________________________________________
 Gestão de Assistência Farmacêutica
 Secretaria Municipal de Saúde
-Campina Grande / PB`;
+${dashboard.meta.municipality} / ${dashboard.meta.state}`;
 
     setOficioText(text);
     setJustifiedProduct(`${partner.municipio} - ${medsList.length} itens`);
@@ -1867,17 +1835,17 @@ Campina Grande / PB`;
         <MetricCard
           tone="red"
           icon={<Boxes size={24} />}
-          label="Produtos Zerados em CG"
+          label={`Produtos Zerados em ${dashboard.meta.municipality}`}
           value={numberFmt.format(regionalPartners.meta.totalProdutosZeradosCG)}
           detail="Medicamentos sem estoque no município"
-          footnote="PB (Raio 120km)"
+          footnote={`${dashboard.meta.state} (Raio ${regionalPartners.meta.raioBuscaKm}km)`}
         />
         <MetricCard
           tone="blue"
           icon={<Handshake size={24} />}
           label="Municípios com Mesma Falta"
           value={numberFmt.format(totalPartners)}
-          detail="Candidatos a compra conjunta (raio 120km)"
+          detail={`Candidatos a compra conjunta (raio ${regionalPartners.meta.raioBuscaKm}km)`}
           footnote="Consórcios e SRP"
         />
         <MetricCard
@@ -1926,6 +1894,7 @@ Campina Grande / PB`;
           partners={filteredPartners}
           selected={selectedPartner}
           onSelect={setSelectedPartner}
+          baseName={dashboard.meta.municipality}
         />
 
         {/* Painel de Detalhes do Parceiro Selecionado e Gerador de Ofício */}
@@ -1938,7 +1907,7 @@ Campina Grande / PB`;
                     <MapPin size={18} className="text-cyan" />
                     {selectedPartner.municipio}
                   </h3>
-                  <p>{selectedPartner.distKm.toFixed(1)} km de distância de Campina Grande</p>
+                  <p>{selectedPartner.distKm.toFixed(1)} km de distância de {dashboard.meta.municipality}</p>
                 </div>
                 <button 
                   className="actionButton"
@@ -2150,66 +2119,169 @@ Campina Grande / PB`;
    ========================================================================== */
 export function FarmaDashboard() {
   const [activeView, setActiveView] = useState<ActiveView>("situacao");
-  const [selectedUnit, setSelectedUnit] = useState<UnitPoint>((campinaDashboard.unitPoints as UnitPoint[])[0]);
+  const [selectedUnit, setSelectedUnit] = useState<UnitPoint | null>(null);
   const [investigarTab, setInvestigarTab] = useState<"unidades" | "medicamentos" | "lotes">("unidades");
   const [agirTab, setAgirTab] = useState<"remanejar" | "comprar" | "copiloto">("remanejar");
 
+  const [municipalityList, setMunicipalityList] = useState<MunicipalityIndexEntry[]>([]);
+  const [selectedMunicipality, setSelectedMunicipality] = useState<MunicipalityIndexEntry | null>(null);
+  const [dashboard, setDashboard] = useState<DashboardData | null>(null);
+  const [partners, setPartners] = useState<RegionalPartnersPayload | null>(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    getMunicipalityList()
+      .then((list) => {
+        setMunicipalityList(list);
+        const defaultMun = list.find((m) => m.slug === "campina-grande") || list[0];
+        if (defaultMun) {
+          handleSelect(defaultMun);
+        } else {
+          setLoading(false);
+        }
+      })
+      .catch((err) => {
+        console.error(err);
+        setLoading(false);
+      });
+  }, []);
+
+  async function handleSelect(mun: MunicipalityIndexEntry) {
+    setLoading(true);
+    try {
+      const dbData = await loadDashboard(mun.uf, mun.slug);
+      const partnersData = await loadRegionalPartners(mun.uf, mun.slug);
+      setDashboard(dbData);
+      setPartners(partnersData);
+      setSelectedMunicipality(mun);
+      setSelectedUnit((dbData.unitPoints as UnitPoint[])[0] || null);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  if (loading || !dashboard || !partners || !selectedMunicipality) {
+    return (
+      <div style={{
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        height: "100vh",
+        backgroundColor: "#0d0f12",
+        color: "#ffffff",
+        fontFamily: "sans-serif"
+      }}>
+        <div style={{ textAlign: "center" }}>
+          <div style={{
+            border: "4px solid rgba(255,255,255,0.1)",
+            borderLeftColor: "#3b82f6",
+            borderRadius: "50%",
+            width: "40px",
+            height: "40px",
+            animation: "spin 1s linear infinite",
+            margin: "0 auto 16px"
+          }} />
+          <style dangerouslySetInnerHTML={{__html: `
+            @keyframes spin {
+              to { transform: rotate(360deg); }
+            }
+          `}} />
+          <div>Carregando FarmaCerta...</div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <main className="appShell">
-      <Sidebar activeView={activeView} onChange={setActiveView} />
-      <section className="workspace">
-        <header className="topbar">
-          <div>
-            <span className="eyebrow">FarmaCerta PB</span>
-            <h1>Gestão de Saúde Pública · Campina Grande/PB</h1>
-          </div>
-          <div className="topActions">
-            <span className="sourceBadge">BNAFAR real · {formatDate(campinaDashboard.meta.stockPositionDate)}</span>
-            <button className="iconButton" aria-label="Notificações" type="button"><Bell size={20} /></button>
-            <div className="avatar">JF</div>
-          </div>
-        </header>
+    <MunicipalityContext.Provider value={{
+      dashboard,
+      regionalPartners: partners,
+      slug: selectedMunicipality.slug,
+      name: selectedMunicipality.name,
+      uf: selectedMunicipality.uf
+    }}>
+      <main className="appShell" key={selectedMunicipality.slug}>
+        <Sidebar activeView={activeView} onChange={setActiveView} />
+        <section className="workspace">
+          <header className="topbar">
+            <div>
+              <span className="eyebrow">FarmaCerta</span>
+              <div style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "4px" }}>
+                <h1 style={{ margin: 0 }}>Gestão de Saúde Pública ·</h1>
+                <select
+                  value={selectedMunicipality.slug}
+                  onChange={(e) => {
+                    const found = municipalityList.find((m) => m.slug === e.target.value);
+                    if (found) handleSelect(found);
+                  }}
+                  style={{
+                    backgroundColor: "#161b22",
+                    color: "#c9d1d9",
+                    border: "1px solid #30363d",
+                    borderRadius: "6px",
+                    padding: "6px 12px",
+                    fontSize: "16px",
+                    fontWeight: "bold",
+                    outline: "none",
+                    cursor: "pointer"
+                  }}
+                >
+                  {municipalityList.map((m) => (
+                    <option key={m.slug} value={m.slug}>
+                      {m.name} / {m.uf}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+            <div className="topActions">
+              <span className="sourceBadge">BNAFAR real · {formatDate(dashboard.meta.stockPositionDate)}</span>
+              <button className="iconButton" aria-label="Notificações" type="button"><Bell size={20} /></button>
+              <div className="avatar">JF</div>
+            </div>
+          </header>
 
-        {activeView === "situacao" ? (
-          <SituacaoAtualView
-            onNavigateToInvestigar={(tab) => {
-              setInvestigarTab(tab);
-              setActiveView("investigar");
-            }}
-            onNavigateToAgir={(tab) => {
-              setAgirTab(tab);
-              setActiveView("agir");
-            }}
-          />
-        ) : null}
+          {activeView === "situacao" ? (
+            <SituacaoAtualView
+              onNavigateToInvestigar={(tab) => {
+                setInvestigarTab(tab);
+                setActiveView("investigar");
+              }}
+              onNavigateToAgir={(tab) => {
+                setAgirTab(tab);
+                setActiveView("agir");
+              }}
+            />
+          ) : null}
 
-        {activeView === "investigar" ? (
-          <InvestigarView
-            activeTab={investigarTab}
-            setActiveTab={setInvestigarTab}
-            selectedUnit={selectedUnit}
-            setSelectedUnit={setSelectedUnit}
-          />
-        ) : null}
+          {activeView === "investigar" ? (
+            <InvestigarView
+              activeTab={investigarTab}
+              setActiveTab={setInvestigarTab}
+              selectedUnit={selectedUnit || (dashboard.unitPoints as UnitPoint[])[0]}
+              setSelectedUnit={setSelectedUnit}
+            />
+          ) : null}
 
-        {activeView === "agir" ? (
-          <AgirView
-            activeTab={agirTab}
-            setActiveTab={setAgirTab}
-          />
-        ) : null}
+          {activeView === "agir" ? (
+            <AgirView
+              activeTab={agirTab}
+              setActiveTab={setAgirTab}
+            />
+          ) : null}
 
-        {activeView === "parceria" ? <ParceriaRegionalView /> : null}
+          {activeView === "parceria" ? <ParceriaRegionalView /> : null}
 
-        {activeView === "relatorios" ? <ReportsView /> : null}
-
-        <footer className="dataFooter">
-          <ClipboardList size={18} />
-          <span>
-            Dados reais: BNAFAR posição de estoque, Campina Grande/PB. O recorte contém 26 unidades/CNES com estoque publicado nesta carga. Preço: BPS 2023-2025; CMED preparada como referência complementar.
-          </span>
-        </footer>
-      </section>
-    </main>
+          <footer className="dataFooter">
+            <ClipboardList size={18} />
+            <span>
+              Dados reais: BNAFAR posição de estoque, {selectedMunicipality.name}/{selectedMunicipality.uf}. O recorte contém {dashboard.unitPoints.length} unidades/CNES com estoque publicado nesta carga. Preço: BPS 2023-2025; CMED preparada como referência complementar.
+            </span>
+          </footer>
+        </section>
+      </main>
+    </MunicipalityContext.Provider>
   );
 }

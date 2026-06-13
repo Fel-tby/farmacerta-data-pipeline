@@ -1,0 +1,26 @@
+[
+  {
+    "slug": "campina-grande",
+    "name": "Campina Grande",
+    "uf": "PB",
+    "generatedAt": "2026-06-13"
+  },
+  {
+    "slug": "joao-pessoa",
+    "name": "João Pessoa",
+    "uf": "PB",
+    "generatedAt": "2026-06-13"
+  },
+  {
+    "slug": "patos",
+    "name": "Patos",
+    "uf": "PB",
+    "generatedAt": "2026-06-13"
+  },
+  {
+    "slug": "guarabira",
+    "name": "Guarabira",
+    "uf": "PB",
+    "generatedAt": "2026-06-13"
+  }
+]

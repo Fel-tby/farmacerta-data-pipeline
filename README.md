@@ -12,16 +12,25 @@ A interface faz parte do repositório, mas o centro do projeto é a pipeline: da
 
 O fluxo começa na coleta de arquivos públicos do BNAFAR e do BPS. A partir do arquivo nacional de estoque do BNAFAR, a pipeline recorta uma UF e, a seguir, um município específico. Os campos de estoque, lote, validade, unidade e produto são normalizados e cruzados com referências de preço do BPS e bases complementares como o CMED, quando disponíveis. O resultado são marts analíticos em JSON prontos para a aplicação, separados por município, que a interface Next.js consome diretamente.
 
+A pipeline também calcula parceiros regionais: municípios vizinhos (por coordenadas geográficas) que compartilham faltas semelhantes, úteis para apoiar compras conjuntas e consórcios de saúde.
+
 ---
 
 ## Camada analítica
 
-A pipeline produz marts prontos para a aplicação em `packages/data/src/`. A interface importa esses arquivos diretamente, o que permite rodar o projeto sem banco de dados.
+A pipeline produz marts prontos para a aplicação em `packages/data/src/municipios/`. A interface carrega os dados dinamicamente via fetch, o que permite rodar o projeto sem banco de dados e adicionar novos municípios sem recompilar a aplicação.
 
-A saída municipal canônica fica em:
+A saída por município fica em:
 
 ```text
-packages/data/src/municipios/pb/campina-grande/dashboard.json
+packages/data/src/municipios/{uf}/{slug}/dashboard.json
+packages/data/src/municipios/{uf}/{slug}/regional-partners.json
+```
+
+O índice de municípios disponíveis fica em:
+
+```text
+packages/data/src/municipios/index.json
 ```
 
 As regras analíticas atuais cobrem: estoque zero por linha; produto zerado no município; lote vencido com saldo positivo; lote vencendo em 30 ou 60 dias; oportunidade de remanejamento interno; mapeamento de municípios próximos com faltas semelhantes para apoiar compra conjunta regional; e comparação de compra defensável contra referências BPS e CMED.
@@ -46,31 +55,37 @@ O manifesto das fontes públicas fica em [config/sources.json](config/sources.js
 
 ```text
 config/
-  sources.json               # URLs públicas e caminhos locais das fontes
+  sources.json                    # URLs públicas e caminhos locais das fontes
+  municipalities.json             # lista de municípios a processar em lote
 
 data/
-  raw/                       # ignorado: arquivos baixados
-  processed/                 # ignorado: intermediários locais
+  raw/                            # ignorado: arquivos baixados
+  processed/                      # ignorado: intermediários locais
   README.md
 
 scripts/
-  collect_sources.py         # baixa e extrai BNAFAR/BPS
-  extract_uf.py              # recorta uma UF a partir do BNAFAR nacional
-  extract_municipality.py    # recorta um município a partir da UF
-  generate_dashboard_data.py # gera os marts analíticos JSON
-  run_pipeline.py            # orquestra coleta -> UF -> município -> mart
+  collect_sources.py              # baixa e extrai BNAFAR/BPS
+  extract_uf.py                   # recorta uma UF a partir do BNAFAR nacional
+  extract_municipality.py         # recorta um município a partir da UF
+  generate_dashboard_data.py      # gera os marts analíticos JSON de um município
+  generate_regional_partners.py   # calcula municípios vizinhos com faltas semelhantes
+  generate_all_municipalities.py  # orquestra a pipeline para todos os municípios do config
+  run_pipeline.py                 # orquestra coleta -> UF -> município -> mart (unitário)
 
 packages/data/src/
-  municipios/pb/campina-grande/dashboard.json
+  municipios/
+    index.json                    # índice de municípios gerados
+    {uf}/{slug}/
+      dashboard.json              # mart analítico do município
+      regional-partners.json      # parceiros regionais calculados
   cmed-prices.json
-  regional-partners.json
   index.ts
 
 packages/ai/
   regras determinísticas e auxiliares opcionais de IA
 
 apps/web/
-  interface analítica em Next.js
+  interface analítica em Next.js com seletor de município
 ```
 
 ---
@@ -84,25 +99,25 @@ npm install
 npm run dev
 ```
 
-Abra `http://localhost:3000`.
+Abra `http://localhost:3000`. A interface apresenta um seletor de município no topo; os dados são carregados dinamicamente para cada município disponível em `packages/data/src/municipios/`.
 
 ---
 
 ## Rodando a pipeline de dados
 
-Para usar os arquivos já presentes em `data/raw/` e reconstruir apenas a camada analítica:
+### Para um único município
+
+Para usar os arquivos já presentes em `data/raw/` e reconstruir apenas a camada analítica de um município:
 
 ```bash
-npm run data:pipeline -- --skip-collect
+npm run data:pipeline -- --skip-collect --municipio "Campina Grande" --uf PB
 ```
 
-Para baixar as fontes públicas do zero, extrair PB, extrair Campina Grande/PB e reconstruir o dataset consumido pela aplicação:
+Para baixar as fontes públicas do zero, extrair e reconstruir o dataset:
 
 ```bash
-npm run data:pipeline
+npm run data:pipeline -- --municipio "Campina Grande" --uf PB
 ```
-
-O arquivo nacional do BNAFAR fica grande após extração. Arquivos brutos são ignorados pelo Git de propósito.
 
 As etapas também podem ser executadas separadamente:
 
@@ -112,6 +127,18 @@ npm run data:extract:uf -- --uf PB
 npm run data:extract -- --municipio "Campina Grande" --uf PB
 npm run data:build
 ```
+
+### Para todos os municípios configurados
+
+Para rodar a pipeline completa para todos os municípios listados em `config/municipalities.json` e regenerar o `index.json`:
+
+```bash
+npm run data:pipeline:all
+```
+
+Isso gera (ou atualiza) os marts de cada município e atualiza o índice que a interface consome para popular o seletor.
+
+### Variáveis de ambiente
 
 Caminhos podem ser sobrescritos por variável de ambiente. No bash:
 
@@ -126,6 +153,8 @@ $env:BNAFAR_CSV="C:\dados\estoque_municipal.csv"
 $env:BPS_DIR="C:\dados\bps"
 npm run data:build
 ```
+
+O arquivo nacional do BNAFAR fica grande após extração. Arquivos brutos são ignorados pelo Git de propósito.
 
 ---
 
